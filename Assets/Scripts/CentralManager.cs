@@ -10,21 +10,25 @@ public class CentralManager : NetworkBehaviour {
     public GameObject PlayerUnitPrefab;
     public List<Player> players = new List<Player>();
     public List<GameObject> playerUnits = new List<GameObject>();
-    public enum GameState { PRE_GAME, IN_GAME };
-    public enum Move {NONE, UP, DOWN, LEFT, RIGHT, ATTACK_1 };
+    public enum GameState { PRE_GAME, IN_GAME, POST_GAME };
+    public enum Move {NONE, UP, DOWN, LEFT, RIGHT, ATTACK_UP, ATTACK_DOWN, ATTACK_LEFT, ATTACK_RIGHT };
+    [SyncVar]
     public GameState gameState = GameState.PRE_GAME;
     public Move movePlayer1 = Move.NONE;
     public Move movePlayer2 = Move.NONE;
 
+    BoardManager bm;
+
     public Text timer;
-    float timePerTurn = 10;
+    float timePerTurn = 5;
     [SyncVar]
-    float timeLeftInTurn = 10;
+    float timeLeftInTurn = 5;
 
 
     private void Awake()
     {
         instance = this;
+        bm = GetComponent<BoardManager>();
     }
 
     void Start () {
@@ -34,7 +38,16 @@ public class CentralManager : NetworkBehaviour {
 	// Update is called once per frame
 	void Update () {
 
-        timer.text = timeLeftInTurn.ToString();
+        if (gameState == GameState.IN_GAME)
+        {
+            timer.text = timeLeftInTurn.ToString();
+        }
+        else if (gameState == GameState.POST_GAME)
+        {
+            timer.text = "Game Over";
+        }
+        
+        
 
 		if (isServer == false)
         {
@@ -50,33 +63,49 @@ public class CentralManager : NetworkBehaviour {
         {
             for (int i = 0; i < players.Count; i++)
             {
-                players[i].playerIndex = i;
+                Player p = players[i];
+                p.playerIndex = i;              
+
                 GameObject go = Instantiate(PlayerUnitPrefab);
                 if (i == 0)
                 {
-                    go.transform.Translate(new Vector3(-2.5f, 3, 0));
-                    go.GetComponent<SpriteRenderer>().color = Color.red;
+                    
+                    p.row = 0;
+                    p.col = 0;
+                    go.GetComponent<PlayerUnit>().color = Color.red;
                 } else
-                {
-                    go.transform.Translate(new Vector3(2.5f, -2, 0));
-                    go.GetComponent<SpriteRenderer>().color = Color.blue;
+                {                    
+                    p.row = 5;
+                    p.col = 5;
+                    go.GetComponent<PlayerUnit>().color = Color.blue;
                 }
+                go.transform.position = bm.positions[p.row, p.col];
                 playerUnits.Add(go);
                 NetworkServer.Spawn(go);
             }
             gameState = GameState.IN_GAME;
         }
-
-        if (timeLeftInTurn <= 0)
+        
+        if (gameState == GameState.IN_GAME)
         {
-            ApplyMoves();
-            timeLeftInTurn = timePerTurn;
-        }
-        else
-        {
-            timeLeftInTurn -= Time.deltaTime;
-        }
+            if (timeLeftInTurn <= 0)
+            {
+                ApplyMoves();
+                timeLeftInTurn = timePerTurn;
+            }
+            else
+            {
+                timeLeftInTurn -= Time.deltaTime;
+            }
 
+            for (int i = 0; i < players.Count; i++)
+            {
+                if (players[i].health <= 0)
+                {
+                    gameState = GameState.POST_GAME;
+                }
+            }
+        }      
 
 	}
 
@@ -85,28 +114,91 @@ public class CentralManager : NetworkBehaviour {
         ApplyMove(0, movePlayer1);
         ApplyMove(1, movePlayer2);
 
+        ApplyAttack(0, 1, movePlayer1);
+        ApplyAttack(1, 0, movePlayer2);
+
         movePlayer1 = Move.NONE;
         movePlayer2 = Move.NONE;
     }    
 
+    void ApplyAttack(int playerIndex, int enemyIndex, Move move)
+    {
+        Player p = players[playerIndex];
+        Player e = players[enemyIndex];
+        if (move == Move.ATTACK_UP)
+        {
+            if (p.col == e.col && p.row - e.row <= 2 && p.row - e.row > 0)
+            {
+                e.health -= 1;
+            }
+        }
+
+        if (move == Move.ATTACK_DOWN)
+        {
+            if (p.col == e.col && e.row - p.row <= 2 && e.row - p.row > 0)
+            {
+                e.health -= 1;
+            }
+        }
+
+        if (move == Move.ATTACK_LEFT)
+        {
+            if (p.row == e.row && p.col - e.col <= 2 && p.col - e.col > 0)
+            {
+                e.health -= 1;
+            }
+        }
+
+        if (move == Move.ATTACK_RIGHT)
+        {
+            if (p.row == e.row && e.col - p.col<= 2 && e.col - p.col > 0)
+            {
+                e.health -= 1;
+            }
+        }
+
+    }
+
     void ApplyMove(int unitIndex, Move move)
     {
+        Player p = players[unitIndex];
+        GameObject u = playerUnits[unitIndex];
         if (move == Move.UP)
         {
-            playerUnits[unitIndex].transform.Translate(Vector3.up);
+            if (bm.IsLegalMove(p.row - 1, p.col))
+            {
+                p.row -= 1;
+                u.transform.Translate(Vector3.up);
+            }
+            
         }
         if (move == Move.DOWN)
         {
-            playerUnits[unitIndex].transform.Translate(Vector3.down);
+            if (bm.IsLegalMove(p.row + 1, p.col))
+            {
+                p.row += 1;
+                u.transform.Translate(Vector3.down);
+            }
+
         }
         if (move == Move.LEFT)
         {
-            playerUnits[unitIndex].transform.Translate(Vector3.left);
+            if (bm.IsLegalMove(p.row, p.col - 1))
+            {
+                p.col -= 1;
+                u.transform.Translate(Vector3.left);
+            }
+
         }
         if (move == Move.RIGHT)
         {
-            playerUnits[unitIndex].transform.Translate(Vector3.right);
+            if (bm.IsLegalMove(p.row, p.col + 1))
+            {
+                p.col += 1;
+                u.transform.Translate(Vector3.right);
+            }
         }
+
     }
 
     public void RegisterMove(Player player, Move move)
